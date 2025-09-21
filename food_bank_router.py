@@ -19,6 +19,8 @@ VICTORIA_BOUNDING_BOX = {
     "max_lon": -123.20,
 }
 
+VICTORIA_VIEWBOX = f"{VICTORIA_BOUNDING_BOX['min_lon']},{VICTORIA_BOUNDING_BOX['min_lat']},{VICTORIA_BOUNDING_BOX['max_lon']},{VICTORIA_BOUNDING_BOX['max_lat']}"
+
 @dataclass
 class Route:
     name: str  # human readable route name
@@ -373,11 +375,13 @@ def geocode_orders(orders: Iterable[Order], cache_path: Path, delay_seconds: flo
             response = session.get(
                 "https://nominatim.openstreetmap.org/search",
                 params={
-                    "q": f"{order.address1.strip()}, Victoria, BC",
+                    "q": order.address1.strip(),
                     "format": "json",
                     "addressdetails": 0,
                     "limit": 5,
                     "countrycodes": "ca",
+                    "viewbox": VICTORIA_VIEWBOX,
+                    "bounded": 1,
                     "email": NOMINATIM_EMAIL,
                 },
                 timeout=20,
@@ -391,14 +395,17 @@ def geocode_orders(orders: Iterable[Order], cache_path: Path, delay_seconds: flo
         if not results:
             raise ValueError(f"Nominatim could not find address: {_address_with_notes(order, ' | ')}")
 
-        best = _choose_best_result(results)
+        best, ordered_candidates = _choose_best_result(results)
+        if best is None:
+            sample = ordered_candidates[0]
+            sample_lat = float(sample["lat"])
+            sample_lon = float(sample["lon"])
+            raise ValueError(
+                f"No geocode results within Victoria bounds for '{_address_with_notes(order, ' | ')}'. Closest match lat={sample_lat}, lon={sample_lon}"
+            )
+
         lat = float(best["lat"])
         lon = float(best["lon"])
-
-        if not _within_victoria(lat, lon):
-            raise ValueError(
-                f"Geocoded location outside Victoria bounds for '{_address_with_notes(order, ' | ')}': lat={lat}, lon={lon}"
-            )
 
         order.lat = lat
         order.lon = lon
@@ -437,11 +444,20 @@ def _append_cache_entry(cache_path: Path, address: str, lat: float, lon: float) 
         writer.writerow([address, f"{lat:.8f}", f"{lon:.8f}"])
 
 
-def _choose_best_result(results: List[Dict[str, str]]) -> Dict[str, str]:
-    return min(
+def _choose_best_result(results: List[Dict[str, str]]) -> Tuple[Optional[Dict[str, str]], List[Dict[str, str]]]:
+    print(results)
+    ordered = sorted(
         results,
         key=lambda item: _distance_km(float(item["lat"]), float(item["lon"]), VICTORIA_LAT, VICTORIA_LON),
     )
+
+    for candidate in ordered:
+        lat = float(candidate["lat"])
+        lon = float(candidate["lon"])
+        if _within_victoria(lat, lon):
+            return candidate, ordered
+
+    return None, ordered
 
 
 def _within_victoria(lat: float, lon: float) -> bool:
