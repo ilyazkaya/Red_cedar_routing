@@ -333,30 +333,50 @@ def _format_float(value: Optional[float]) -> str:
     return f"{value:.6f}"
 
 
-
-    main()
-
-
 def run_workflow() -> None:
     """Adjust the paths below and run this file in PyCharm to execute the workflow."""
-    external_csv = Path("data/real_addresses.csv")
+    external_csv = Path("data/real_addresses.csv")  # TODO: update to the latest external CSV
     routes_csv = Path("data/route_centers.csv")  # optional route metadata lookup
     working_csv = Path("output/orders_working.csv")  # internal, full-data CSV output
     simple_xlsx = Path("output/orders_simple.xlsx")  # simplified workbook for sharing
     kml_path = Path("output/orders_route.kml")  # optional Google Earth export
 
-    routes = Route.load_from_csv(routes_csv)
+    routes: Optional[Dict[str, Route]] = None
+    if routes_csv.exists():
+        try:
+            routes = Route.load_from_csv(routes_csv)
+        except OSError as exc:
+            print(f"Unable to load routes CSV at {routes_csv}: {exc}")
+    else:
+        print(f"Route CSV not found at {routes_csv}, continuing without routes")
 
-    book = OrderBook.from_external_csv(external_csv, routes)
+    try:
+        book = OrderBook.from_external_csv(external_csv, routes)
+    except OSError as exc:
+        print(f"Unable to load external CSV at {external_csv}: {exc}")
+        return
 
-    book.to_working_csv(working_csv)
-    print(f"Saved working CSV to {working_csv}")
+    try:
+        book.to_working_csv(working_csv)
+        print(f"Saved working CSV to {working_csv}")
+    except OSError as exc:
+        print(f"Unable to write working CSV: {exc}")
 
-    book.to_simple_xlsx(simple_xlsx)
-    print(f"Saved simplified XLSX to {simple_xlsx}")
+    try:
+        book.to_simple_xlsx(simple_xlsx)
+        print(f"Saved simplified XLSX to {simple_xlsx}")
+    except (RuntimeError, OSError) as exc:
+        print(f"Unable to write XLSX: {exc}")
 
-    book.to_kml(kml_path, connect_points=False)
-    print(f"Saved KML to {kml_path}")
+    missing_coords = [order for order in book.orders if order.lat is None or order.lon is None]
+    if missing_coords:
+        print(f"Skipping KML export: missing coordinates for {len(missing_coords)} orders.")
+    else:
+        try:
+            book.to_kml(kml_path, connect_points=False)
+            print(f"Saved KML to {kml_path}")
+        except OSError as exc:
+            print(f"Unable to write KML: {exc}")
 
 
 if __name__ == "__main__":
