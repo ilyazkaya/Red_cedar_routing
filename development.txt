@@ -9,16 +9,16 @@
 	- file address: "data\real_addresses.csv"
 	- column "Address". First row is headers.
 	- remove the delivery notes after the "new line" symbol in the address string.
-- geocode the addresses using Nominatim
-	- create a list of dictionaries for the addresses where each address is a dictionary. This dictionary will be used 
-	- check if cache exists. Create it if it doesn't exist.
+- geocode the addresses using Nominatim. The script should so the following:
+	- check if cache exists (data/address_cache.csv). Create it if it doesn't exist.
 	- check if the address is already cached
-	- request the geocode if it the address is missing from the cache
+	- request the geocode if the address is missing from the cache
 		- if Nomminatim returns multiple addresses, pick the address that is the closes to Victoria.
 		- if Nominatim can't find the address the program should stop and a clear error message with the bounced address must be produced.
 		- All addresses must fall within the bounding box around Victoria, BC. Otherwise the program should stop and a clear error message with the problematic address must be produced.
 	- the cache file must be updated after every successful Nominatim response. This will ensure that the geocodes are not lost if the script errors out.
 	- Nominatim request must include my email: ilyakapral@gmail.com
+	- be polite with the API.
 - output a csv with a list of all addresses with geocodes.
 	- create a standard function that writes a list of dictionaries to 
 - create a .kml file for address visualization

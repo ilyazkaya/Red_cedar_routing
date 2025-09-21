@@ -1,11 +1,23 @@
 from __future__ import annotations
 
 import csv
+import math
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
+import requests
 import xml.etree.ElementTree as ET
 
+NOMINATIM_EMAIL = "ilyakapral@gmail.com"
+VICTORIA_LAT = 48.4284
+VICTORIA_LON = -123.3656
+VICTORIA_BOUNDING_BOX = {
+    "min_lat": 48.35,
+    "max_lat": 48.60,
+    "min_lon": -123.50,
+    "max_lon": -123.20,
+}
 
 @dataclass
 class Route:
@@ -235,7 +247,7 @@ class OrderBook:
                 placemark = ET.SubElement(folder, "Placemark")
                 label = "" if order.route_position is None else str(order.route_position)
                 ET.SubElement(placemark, "name").text = label
-                ET.SubElement(placemark, "description").text = order.address_cell()
+                ET.SubElement(placemark, "description").text = _address_with_notes(order)
 
                 point = ET.SubElement(placemark, "Point")
                 coord = f"{_format_float(order.lon)},{_format_float(order.lat)},0"  # KML expects lon,lat,altitude
@@ -326,6 +338,138 @@ class OrderBook:
         return result[:31]
 
 
+def geocode_orders(orders: Iterable[Order], cache_path: Path, delay_seconds: float = 1.0) -> None:
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    if not cache_path.exists():
+        with cache_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["address", "lat", "lon"])
+
+    cache = _load_address_cache(cache_path)
+    session = requests.Session()
+    session.headers.update({"User-Agent": f"FoodBankRouter/1.0 ({NOMINATIM_EMAIL})"})
+
+    pending = [order for order in orders if order.lat is None or order.lon is None]
+    if not pending:
+        return
+
+    last_request = 0.0
+    for order in pending:
+        key = _cache_key(order)
+        if not key:
+            raise ValueError(f"Cannot geocode order {order.id or order.name}, address is empty.")
+
+        if key in cache:
+            print(f'Found {order.address1} in cache! Skipping')
+            order.lat, order.lon = cache[key]
+            continue
+
+        wait_for = delay_seconds - (time.time() - last_request)
+        if wait_for > 0:
+            time.sleep(wait_for)
+
+        print(f"requesting Nominatim geocode for {order.address1}")
+        try:
+            response = session.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={
+                    "q": f"{order.address1.strip()}, Victoria, BC",
+                    "format": "json",
+                    "addressdetails": 0,
+                    "limit": 5,
+                    "countrycodes": "ca",
+                    "email": NOMINATIM_EMAIL,
+                },
+                timeout=20,
+            )
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            raise RuntimeError(f"Nominatim request failed for '{_address_with_notes(order, ' | ')}': {exc}") from exc
+
+        last_request = time.time()
+        results = response.json()
+        if not results:
+            raise ValueError(f"Nominatim could not find address: {_address_with_notes(order, ' | ')}")
+
+        best = _choose_best_result(results)
+        lat = float(best["lat"])
+        lon = float(best["lon"])
+
+        if not _within_victoria(lat, lon):
+            raise ValueError(
+                f"Geocoded location outside Victoria bounds for '{_address_with_notes(order, ' | ')}': lat={lat}, lon={lon}"
+            )
+
+        order.lat = lat
+        order.lon = lon
+        cache[key] = (lat, lon)
+        _append_cache_entry(cache_path, order.address1.strip(), lat, lon)
+
+
+def _cache_key(order: Order) -> str:
+    return order.address1.strip().lower()
+
+
+def _load_address_cache(cache_path: Path) -> Dict[str, Tuple[float, float]]:
+    cache: Dict[str, Tuple[float, float]] = {}
+    if not cache_path.exists():
+        return cache
+    with cache_path.open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            address = (row.get("address") or "").strip()
+            lat = Route._parse_float(row.get("lat"))
+            lon = Route._parse_float(row.get("lon"))
+            if not address or lat is None or lon is None:
+                continue
+            keys = {address.lower()}
+            first_line = address.splitlines()[0].strip().lower()
+            if first_line:
+                keys.add(first_line)
+            for key in keys:
+                cache[key] = (lat, lon)
+    return cache
+
+
+def _append_cache_entry(cache_path: Path, address: str, lat: float, lon: float) -> None:
+    with cache_path.open("a", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow([address, f"{lat:.8f}", f"{lon:.8f}"])
+
+
+def _choose_best_result(results: List[Dict[str, str]]) -> Dict[str, str]:
+    return min(
+        results,
+        key=lambda item: _distance_km(float(item["lat"]), float(item["lon"]), VICTORIA_LAT, VICTORIA_LON),
+    )
+
+
+def _within_victoria(lat: float, lon: float) -> bool:
+    return (
+        VICTORIA_BOUNDING_BOX["min_lat"] <= lat <= VICTORIA_BOUNDING_BOX["max_lat"]
+        and VICTORIA_BOUNDING_BOX["min_lon"] <= lon <= VICTORIA_BOUNDING_BOX["max_lon"]
+    )
+
+
+def _distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    radius = 6371.0
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+
+    a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return radius * c
+
+
+def _address_with_notes(order: Order, separator: str = "\\n") -> str:
+    parts: List[str] = []
+    if order.address1.strip():
+        parts.append(order.address1.strip())
+    if order.address2.strip():
+        parts.append(order.address2.strip())
+    return separator.join(parts)
 
 def _format_float(value: Optional[float]) -> str:
     if value is None:
@@ -356,6 +500,13 @@ def run_workflow() -> None:
         print(f"Unable to load external CSV at {external_csv}: {exc}")
         return
 
+    cache_path = Path("data/address_cache.csv")
+    try:
+        geocode_orders(book.orders, cache_path)
+    except (RuntimeError, ValueError) as exc:
+        print(exc)
+        return
+
     try:
         book.to_working_csv(working_csv)
         print(f"Saved working CSV to {working_csv}")
@@ -381,3 +532,23 @@ def run_workflow() -> None:
 
 if __name__ == "__main__":
     run_workflow()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
