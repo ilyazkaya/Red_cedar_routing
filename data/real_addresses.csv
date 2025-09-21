@@ -1,129 +1,247 @@
-﻿Address
+﻿Address,Name,Phone,Email,Delivery Instructions,Route
 "729 Violet Avenue 
-"
+",BJ .,12504790613,contact@redcedarcafe.ca,,Saanich
 "640 Marigold Road 
-"
+",Emily Vuozzo,13064070238,evuozzo@gmail.com,Leave at door,Saanich
 "640 Marigold Road 
-"
-1072 Gerda Road
-744 Miller Avenue
-4363 Ridgewood Crescent
-4363 Ridgewood Crescent
+",Tess Lysytsya,17785355025,tesslysytsya@gmail.com,,Saanich
+"1072 Gerda Road 
+Suite, right side of house, glass French doors",Anastasia Munson-Rodriguez,12505071920,ansomuro@gmail.com,,Saanich
+"744 Miller Avenue 
+5",Trina Aldy,12505141508,Trinaannealdy@gmail.com,,Saanich
+"4363 Ridgewood Crescent 
+Lower Unit - Door is at the back with sign that says ""Studio Sea"".  Stairs @ cul-de-sac. Cooler out!",Patrick Dahl,12505390076,harbourviewmaid@gmail.com,,Saanich
+"4363 Ridgewood Crescent 
+Lower Unit - Door is at the back with sign that says ""Studio Sea"".  Stairs @ cul-de-sac. Cooler out!",Jennifer Dahl,12505390076,harbourviewmaid@gmail.com,,Saanich
 "1283 Lidgate Court 
-"
-1231 Hastings Street
-4051 Santa Anita Avenue
-1504 Church Avenue
-1504 Church Avenue
-3884 Gordon Head Road
-4038 Quadra Street
-4280 Oakfield Crescent
-1550 Arrow Road
-4161 Glendenning Road
-4116 Torquay Drive
-1659 Bisley Place 
-1659 Bisley Place 
-1659 Bisley Place
-1853 Fairburn Drive 
-1853 Fairburn Drive 
-246 Gorge Road East
-246 Gorge Road East 
-246 Gorge Road East 
-246 Gorge Road East 
+",Marie Ericka Laran,12505077288,elishaerinmari_dc2003@yahoo.com,,Saanich
+"1231 Hastings Street 
+",Eric Dela cruz,12505883299,ericdc1980@yahoo.com,,Saanich
+"4051 Santa Anita Avenue 
+B",Heather Mitchell,12506869223,hmitch606@gmail.com,"Suite is around left side of house. You’ll see a green mat, that’s our door. Please do NOT go through gate. Thanks so much :)",Saanich
+"1504 Church Avenue 
+204",Jamey S,12502219400,justareveler@gmail.com,,Cordova Bay
+"1504 Church Avenue 
+205",Erin McDermott,12505167465,erinmhome@gmail.com,,Cordova Bay
+"3884 Gordon Head Road 
+",Sierrah Hamilton,19057240353,sierrahahamilton@gmail.com,Please call upon arrival and I will meet you in the driveway :) Thank you!,Cordova Bay
+"4038 Quadra Street 
+417",Darryl Green,12507443868,darrylgreen0505@gmail.com,Intercom code 4170,Cordova Bay
+"4280 Oakfield Crescent 
+B",Jasmine Sorensen,12508848994,jasmine.sorensen@hotmail.com,,Cordova Bay
+"1550 Arrow Road 
+unit 4 buzz 19",Daphne .,17784304302,contact@redcedarcafe.ca,,Cordova Bay
+"4161 Glendenning Road 
+",Christian  Winstanley,12508896015,christianredcedar@outlook.com,,Cordova Bay
+"4116 Torquay Drive 
+",Elena Clark,12508861454,greenseaturtle3@hotmail.com,,Cordova Bay
+"1659 Bisley Place 
+",Taylor Lingard,12508384311,Lingard.taylor@yahoo.ca,,Cordova Bay
+"1659 Bisley Place 
+",Baily McCallum,12504360966,ToxicSummer95@hotmail.com,,Cordova Bay
+"1659 Bisley Place 
+",Augustina Galligos,12505802012,augustinagalligos@hotmail.com,,Cordova Bay
+"1853 Fairburn Drive 
+",Jerin Kurian,17785849141,j4jeryjacob@gmail.com,,Cordova Bay
+"1853 Fairburn Drive 
+",Claudia Ocon,34672174117,claud.ocon@icloud.com,,Cordova Bay
 "246 Gorge Road East 
-"
-246 Gorge Road East 
-246 Gorge Road East 
-246 Gorge Road East 
-2828 Rock Bay Avenue 
-2828 Rock Bay Avenue 
-3150 Jutland Road 
-243 Gorge Road East 
-360 Gorge Road East 
-360 Gorge Road East 
-3293 Douglas Street 
-155 Gorge Road East 
-135 Gorge Road East 
-135 Gorge Road East 
-120 Gorge Road East 
-3366 Douglas Street 
-3211 Harriet Road 
-3442 Whittier Avenue 
-171 Burnside Road West 
-216 Sims Avenue 
-275 Burnside Road West 
-275 Burnside Road West 
-971 Arundel Drive 
-837 Ellery Street 
-948 Esquimalt Road 
-840 Craigflower Road 
-874 Fleming Street 
-521 Comerford Street 
-521 Comerford Street 
-1263 Colville Road 
-109 Wilson Street 
-614 Esquimalt Road 
-707 Esquimalt Road 
-707 Esquimalt Road 
-724 Sea Terrace 
-3216 Alder Street
-2664 Blackwood Street
-2664 Blackwood Street
-3330 Glasgow Avenue
-870 Short Street
-880 Vernon Avenue
-974 Greenridge Crescent
-3890 Blenkinsop Road
-1279 McKenzie Avenue
-2528 Graham Street
-2790 Cedar Hill Road
-1825 Kings Road
-1825 Kings Road
-1825 Kings Road
-2525 Cook Street
-1710 Denman Street
-1635 Haultain Street
-2210 Victor Street
-647 Michigan Street
-450 Superior Street
-425 Simcoe Street
-30 Douglas Street
-215 Oswego Street
-950 Humboldt Street
-490 Vancouver Street
-504 Linden Avenue
-186 Olive Street
-1401 Fort Street
-1035 Belmont Avenue
-1720 Richmond Avenue
-1968 Bee Street
-1787 Elgin Road
-1787 Elgin Road
-2223 Oak Bay Avenue
-2326 Oak Bay Avenue
-2707 Estevan Avenue
-1164 North Park Street
-1500 Chambers Street
-1222 Yukon Street
-1205 Rudlin Street
-1147 View Street
-1381 Pandora Avenue
-1381 Pandora Avenue
-1381 Pandora Avenue
+",sarah webster,12505140602,swebster@pacificahousing.ca,These orders will be picked up,Gorge 1
+"246 Gorge Road East 
+office",Hannah Bodner,12505140602,hbodner@pacificahousing.com,,Gorge 1
+"246 Gorge Road East 
+",sarah webster,12505140602,swebster@pacificahousing.ca,,Gorge 1
+"246 Gorge Road East 
+office",Hannah Bodner,12505140602,hbodner@pacificahousing.com,,Gorge 1
+"246 Gorge Road East 
+",sarah webster,12505140602,swebster@pacificahousing.ca,,Gorge 1
+"246 Gorge Road East 
+",sarah webster,12505140602,swebster@pacificahousing.ca,,Gorge 1
+"246 Gorge Road East 
+office",Hannah Bodner,12505140602,hbodner@pacificahousing.com,,Gorge 1
+"246 Gorge Road East 
+",sarah webster,12505140602,swebster@pacificahousing.ca,,Gorge 1
+"2828 Rock Bay Avenue 
+117",Kevin Bendall,17787003118,kevinjbendall@gmail.com,,Gorge 2
+"2828 Rock Bay Avenue 
+120",Steve  Van Buskirk,12502160843,stevevanb420@gmail.com,,Gorge 2
+"3150 Jutland Road 
+404",Trish Lindsay,16723241928,trishdlindsay@gmail.com,,Gorge 2
+"243 Gorge Road East 
+302",Janai Breffitt,12508899542,the.plaid.pirate@gmail.com,,Gorge 2
+"360 Gorge Road East 
+",Bruce .,12368585176,contact@redcedarcafe.ca,,Gorge 2
+"360 Gorge Road East 
+",Kevin .,12368585176,contact@redcedarcafe.ca,,Gorge 2
+"3293 Douglas Street 
+18",Dennis Rooney,17784331698,wrestlingrooney18@yahoo.com,Please press number 18 on the door pad and I will come down to pick up.,Gorge 2
+"155 Gorge Road East 
+421",Netta Muscatiello,14165621001,netta.muscatiello17@gmail.com,,Gorge 2
+"135 Gorge Road East 
+412",Mike Clark,12502178713,mikeclarknoe@gmail.com,Thank you very much!,Gorge 2
+"135 Gorge Road East 
+412",Jason Brown,17789675358,jasonmbrown222@gmail.com,,Gorge 2
+"120 Gorge Road East 
+213",Clement  Dumas,12269701564,Clamintcolomb@gmail.com,,Gorge 3
+"3366 Douglas Street 
+101",Victoria  Nevens,12506610610,headstreetbarber@gmail.com,,Gorge 3
+"3211 Harriet Road 
+White door",Muriel Fortin,12502202083,fortinm81@gmail.com,,Gorge 3
+"3442 Whittier Avenue 
+",Vincent Evans,17785872793,dumbek@mail.com,,Gorge 3
+"171 Burnside Road West 
+",Raven  Moyer,12508132541,ravenmoyer666@gmail.com,Thank you! ♡,Gorge 3
+"216 Sims Avenue 
+Just leave on top step",Shaun Delage,12506860186,shaundelage@gmail.com,,Gorge 3
+"275 Burnside Road West 
+Buzzer under Webb s or #305 occupied",Samantha Webb,17787625077,samanthawebb007@icloud.com,,Gorge 3
+"275 Burnside Road West 
+Buzzer under Webb s or #305 occupied",Samantha Webb,17787625077,samanthawebb007@icloud.com,,Gorge 3
+"971 Arundel Drive 
+",Karen L. Potts,12509951413,KarenLPotts@gmail.com,,Gorge 3
+"837 Ellery Street 
+106 buzz",Vanessa Y,12505891325,vpyanes@gmail.com,,Esquimalt
+"948 Esquimalt Road 
+527",Ben Chandler,12505806930,chandler1984@live.com,,Esquimalt
+"840 Craigflower Road 
+39",Sarah Paterson,12508811229,sarahpaterson@yahoo.com,,Esquimalt
+"874 Fleming Street 
+",Lana .,12508788343,contact@redcedarcafe.ca,apt 320 buzzer Foss 1083 call upon arrival,Esquimalt
+"521 Comerford Street 
+403",Elizabeth Wright,12505883748,ea88wright@gmail.com,Text 250 588 3748 if you have trouble coming in,Esquimalt
+"521 Comerford Street 
+201",JORDAN MAINVILLE,12505163514,nspvirtania@gmail.com,,Esquimalt
+"1263 Colville Road 
+",Richard Boisvenu,17785872889,richardboisvenu21@hotmail.com,,Esquimalt
+"109 Wilson Street 
+Apt 304",Shelley Smiley,12508858779,shellsmiley@gmail.com,Building name is “The Wing”. Use the buzzer: Press the left most button for the “List”. Use the arrow keys to find my name “S Smiley 0304”. Press “Call” Button in middle. Go up to 3rd floor and turn right down hallway.,Esquimalt
+"614 Esquimalt Road 
+306",kara l,12506610485,kbear540@gmail.com,Pls leave at backdoor! Thanks so much,Esquimalt
+"707 Esquimalt Road 
+339",Veranica Koudriavoff,12508574194,veranicak@gmail.com,"Buzz 251, deliver to unit 339.",Esquimalt
+"707 Esquimalt Road 
+339",Tossia Shelepiuk,12365622235,k2tossia@gmail.com,"Buzz 251, deliver to unit 339.",Esquimalt
+"724 Sea Terrace 
+120",Kim Mears,12508180560,kim.ann.mears@gmail.com,"Please leave at door. No knocking please. :)
+",Esquimalt
+"3216 Alder Street 
+Unit 405, buzzer 118",Tabitha Langkamer,12508807708,tabitha@langkamer.org,"Buzzer 118, leave at door",Quadra
+"2664 Blackwood Street 
+201",William Mino,12505073704,wilson2664@yahoo.com,,Quadra
+"2664 Blackwood Street 
+401",Kamal Bashar,12505889017,necrethus2@outlook.com,,Quadra
+"3330 Glasgow Avenue 
+Buzz 1016",N Noorani,12503857174,nomcanary@yahoo.com,,Quadra
+"870 Short Street 
+302",Diana  Hliva,12508807541,dhliva@shaw.ca,Please call  or text when you arrive and leave at front door entrance,Quadra
+"880 Vernon Avenue 
+Suite 209",Judy Woo,17789228803,judyshwoo@gmail.com,,Quadra
+"974 Greenridge Crescent 
+",dirk zink,12507277435,dirkzink@hotmail.com,,Quadra
+"3890 Blenkinsop Road 
+",Amye St Arnault,12364641087,amyestarnault@gmail.com,,Quadra
+"1279 McKenzie Avenue 
+Back basement unit",Stephanie Garrett,12368823236,Garrett.Ani1@gmail.com,,Quadra
+"2528 Graham Street 
+",Mallory McGowan,17789920402,mallorybdavidson@gmail.com,,Oaklands
+"2790 Cedar Hill Road 
+unit 207",Todd .,17784338464,contact@redcedarcafe.ca,,Oaklands
+"1825 Kings Road 
+unit 102",Leona .,12505950940,contact@redcedarcafe.ca,unit 102,Oaklands
+"1825 Kings Road 
+102",Alex Marshall,12505950940,pearllacie@yahoo.ca,,Oaklands
+"1825 Kings Road 
+102",Pearl Lacie,12505950940,pearllacie@yahoo.ca,,Oaklands
+"2525 Cook Street 
+Basement",Giovanni Hernandez,12508482626,giovannihernandez@live.com.mx,Leave at door,Oaklands
+"1710 Denman Street 
+House",Raya PETERS,12505806974,imagineersden@gmail.com,,Oaklands
+"1635 Haultain Street 
+",Liz Cronin,12508126889,lizml.cronin@gmail.com,Thanks so much!!!!!,Oaklands
+"2210 Victor Street 
+Ground Suite under carport",Morgan Zindle,17789961310,zindle29@gmail.com,,Oaklands
+"647 Michigan Street 
+Unit 1107, buzz 0098",Michael .,17785337967,contact@redcedarcafe.ca,,James Bay
+"450 Superior Street 
+6",Mary Rose,12505141269,yabuchinto@yahoo.ca,,James Bay
+"425 Simcoe Street 
+Apartment 424",MICHAEL BENNETTS,17784401483,bennetsian@gmail.com,,James Bay
+"30 Douglas Street 
+B-12",Lindsay Richey,12503071358,lindsayjrichey27@gmail.com,Please call me when you arrive. Thank-you!,James Bay
+"215 Oswego Street 
+419",Jordan MacLeod,12508825183,jordanmacleod23@hotmail.com,,James Bay
+"950 Humboldt Street 
+unit 201",Marion .,12505900067,contact@redcedarcafe.ca,,James Bay
+"490 Vancouver Street 
+3",Elliott Thomas,14378823284,elliott.s.thomas8@gmail.com,,James Bay
+"504 Linden Avenue 
+",Frank Keifer,12508847555,jmgkeifer@gmail.com,Please leave on front porch.,James Bay
+"186 Olive Street 
+Apartment is located on the left side of the house behind the fence",Cinthia  Tang,12508860924,cindytttt1111@gmail.com,Leave at door,James Bay
+"1401 Fort Street 
+#12",Amber Davis,12505162804,amberdavis2514@gmail.com,"Deliver instruction: please press the button that is #12 at the buzzer, not 1 and 2", Fairfield_Gonzales_Oak Bay
+"1035 Belmont Avenue 
+805",Ron Dragushan,14166366248,Ron.Dragushan@SigmaStar.com,, Fairfield_Gonzales_Oak Bay
+"1720 Richmond Avenue 
+103",Chase Clark,12508889132,gangewifre@gmail.com,, Fairfield_Gonzales_Oak Bay
+"1968 Bee Street 
+unit 407 call when arriving",Katherine .,17782654527,contact@redcedarcafe.ca,, Fairfield_Gonzales_Oak Bay
+"1787 Elgin Road 
+unit 206",Mauricio .,12508571903,contact@redcedarcafe.ca,, Fairfield_Gonzales_Oak Bay
+"1787 Elgin Road 
+unit 207 buzz 31",Visula .,17785331294,contact@redcedarcafe.ca,, Fairfield_Gonzales_Oak Bay
+"2223 Oak Bay Avenue 
+unit 4",James .,12365620388,contact@redcedarcafe.ca,, Fairfield_Gonzales_Oak Bay
+"2326 Oak Bay Avenue 
+On top of mailbox please",Patricia V,12508582408,curiousmiss13@gmail.com,, Fairfield_Gonzales_Oak Bay
+"2707 Estevan Avenue 
+104",Philip Livingston,12505920557,philipwlivingston@gmail.com,"Please leave delivery order on front porch next to the right corner of front door entrance.  Thank you ever so much, from Philip and Eva.", Fairfield_Gonzales_Oak Bay
+"1164 North Park Street 
+",Stephen Bishop,17789671010,steve.2509997373@gmail.com,,Fernwood
+"1500 Chambers Street 
+unit 308",Debbie .,16477034145,debbiemontgomery5891@gmail.com,,Fernwood
+"1222 Yukon Street 
+5",Ganna Vital,16598290725,anna@fnf.vc,,Fernwood
+"1205 Rudlin Street 
+302",Kaz Anderson,12508855315,dancingstardust@gmail.com,,Fernwood
+"1147 View Street 
+203",Asa Durian,17789821273,asa.bella.2994@gmail.com,can leave downstairs on the seat in lobby! door code is 0044,Fernwood
+"1381 Pandora Avenue 
+Unit 304 buzz 304",Rose .,12364787077,contact@redcedarcafe.ca,,Fernwood
+"1381 Pandora Avenue 
+403",Lauren Hoffert,12502087774,laurenhoffert@gmail.com,,Fernwood
+"1381 Pandora Avenue 
+303",Josh Irvine,17786777233,safer.staff@avi.org,,Fernwood
 "1575 Begbie Street 
-"
-1575 Begbie Street 
-1841 Fern Street
-875 North Park Street
-926 Green Street 
-1613 Quadra Street
-945 Balmoral Road
-467 Swift Street
-865 View Street
-865 View Street
-865 View Street
-865 View Street
-865 View Street
-865 View Street
-865 View Street
-930 Yates Street
+",G H,16723811818,dragoncloud.gh@gmail.com,Leave outside,Fernwood
+"1575 Begbie Street 
+",W H,16723812988,whitemantaph@gmail.com,leave outside thanks,Fernwood
+"1841 Fern Street 
+Apt. 310",Jean Hansen,12364707394,lj.hansen@telus.net,,Fernwood
+"875 North Park Street 
+1502",Nicole Payette,17786781885,nicole88008@hotmail.com,"Hello:  Buzz code: 2254 Pls Leave front of #1502 & knock.
+",North Park
+"926 Green Street 
+",Dizzy Feehan,17785339349,dizzyfeehan@gmail.com,,North Park
+"1613 Quadra Street 
+unit 205. call when arrives. deliver after 5:30 pm, back entrance",Rod .,12503816406,contact@redcedarcafe.ca,,North Park
+"945 Balmoral Road 
+upper suite",lichen knight,12364646515,lichenmckinneyknight@gmail.com,,North Park
+"467 Swift Street 
+Apt. 307",Alastair Wright,17786777233,safer.staff@avi.org,,North Park
+"865 View Street 
+unit 307",Blaine .,12505909945,contact@redcedarcafe.ca,,North Park
+"865 View Street 
+unit 302",Zahal .,12506860711,contact@redcedarcafe.ca,,North Park
+"865 View Street 
+601",christian cash,12505146001,ceomindset2019@outlook.com,,North Park
+"865 View Street 
+208",David Tataryn,12503832605,wrigleywriting@gmail.com,,North Park
+"865 View Street 
+601",kyle vigar,12505146001,theboss1489@outlook.com,,North Park
+"865 View Street 
+601",Elissa Mathis,12505146001,entrepreneurmindset89@gmail.com,,North Park
+"865 View Street 
+601",steve loudcans,12505146001,kicka55ss@hotmail.com,,North Park
+"930 Yates Street 
+buzz 0075 or 0072, bring up to door 405 if you can please, or leave at table w mirror pls, no bread",Kris A Drice,17789773824,extradrice@gmail.com,,North Park
