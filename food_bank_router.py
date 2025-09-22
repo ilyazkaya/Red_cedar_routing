@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import math
+from datetime import datetime
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,9 @@ VICTORIA_BOUNDING_BOX = {
 }
 
 VICTORIA_VIEWBOX = f"{VICTORIA_BOUNDING_BOX['min_lon']},{VICTORIA_BOUNDING_BOX['min_lat']},{VICTORIA_BOUNDING_BOX['max_lon']},{VICTORIA_BOUNDING_BOX['max_lat']}"
+
+MAX_ORDERS_PER_ROUTE = 16
+OUTPUT_TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
 
 @dataclass
 class Route:
@@ -276,8 +280,151 @@ class OrderBook:
         tree = ET.ElementTree(kml)
         tree.write(path, encoding="utf-8", xml_declaration=True)
 
+
+
+
+    def assign_routes(
+        self,
+        routes: Dict[str, Route],
+        max_orders_per_route: int = MAX_ORDERS_PER_ROUTE,
+    ) -> None:
+        if not routes:
+            raise ValueError("No routes provided for assignment.")
+
+        centers: Dict[str, Route] = {}
+        for name, route in routes.items():
+            if route.lat is None or route.lon is None:
+                raise ValueError(f"Route '{name}' is missing coordinates.")
+            centers[name] = route
+
+        stops_map: Dict[str, Dict[str, object]] = {}
+        for order in self.orders:
+            address = order.address1.strip()
+            if not address:
+                raise ValueError(f"Order {order.id or order.name or 'unknown'} has empty address1.")
+            if order.lat is None or order.lon is None:
+                raise ValueError(f"Order {order.id or address} lacks coordinates; geocode before assigning routes.")
+            key = address.lower()
+            record = stops_map.setdefault(
+                key,
+                {"address": address, "orders": [], "lat": order.lat, "lon": order.lon},
+            )
+            record["orders"].append(order)
+            if record.get("lat") is None:
+                record["lat"] = order.lat
+            if record.get("lon") is None:
+                record["lon"] = order.lon
+
+        stops: List[Dict[str, object]] = []
+        for record in stops_map.values():
+            orders = record["orders"]
+            lat = record.get("lat")
+            lon = record.get("lon")
+            if lat is None or lon is None:
+                raise ValueError(f"Address '{record['address']}' lacks coordinates.")
+            preferences = sorted(
+                (
+                    (name, _distance_km(lat, lon, centers[name].lat, centers[name].lon))
+                    for name in centers
+                ),
+                key=lambda item: item[1],
+            )
+            gap = preferences[1][1] - preferences[0][1] if len(preferences) > 1 else float("inf")
+            stops.append(
+                {
+                    "address": record["address"],
+                    "orders": orders,
+                    "lat": lat,
+                    "lon": lon,
+                    "order_count": len(orders),
+                    "preferences": preferences,
+                    "gap": gap,
+                    "assigned_route": None,
+                    "assigned_distance": None,
+                }
+            )
+
+        total_orders = sum(stop["order_count"] for stop in stops)
+        capacity_total = max_orders_per_route * len(centers)
+        if total_orders > capacity_total:
+            raise ValueError(
+                f"Not enough route capacity ({capacity_total}) for {total_orders} orders. Increase MAX_ORDERS_PER_ROUTE or add routes."
+            )
+
+        remaining_orders: Dict[str, int] = {name: max_orders_per_route for name in centers}
+        assignments: Dict[str, List[Dict[str, object]]] = {name: [] for name in centers}
+
+        def commit(stop: Dict[str, object], route_name: str, distance: float) -> None:
+            stop["assigned_route"] = route_name
+            stop["assigned_distance"] = distance
+            assignments[route_name].append(stop)
+            remaining_orders[route_name] -= stop["order_count"]  # type: ignore[index]
+
+        def unassign(stop: Dict[str, object]) -> None:
+            route_name = stop.get("assigned_route")
+            if route_name is None:
+                return
+            assignments[route_name].remove(stop)
+            remaining_orders[route_name] += stop["order_count"]  # type: ignore[index]
+            stop["assigned_route"] = None
+            stop["assigned_distance"] = None
+
+        def try_reassign(stop: Dict[str, object]) -> bool:
+            needed = stop["order_count"]  # type: ignore[index]
+            for route_name, distance in stop["preferences"]:  # type: ignore[index]
+                if remaining_orders[route_name] >= needed:
+                    commit(stop, route_name, distance)
+                    return True
+
+                candidate_moves: List[Tuple[float, Dict[str, object], str, float]] = []
+                for candidate in assignments[route_name]:
+                    if candidate is stop:
+                        continue
+                    for alt_name, alt_distance in candidate["preferences"]:  # type: ignore[index]
+                        if alt_name == route_name:
+                            continue
+                        if remaining_orders[alt_name] >= candidate["order_count"]:  # type: ignore[index]
+                            delta = alt_distance - candidate["assigned_distance"]  # type: ignore[index]
+                            candidate_moves.append((delta, candidate, alt_name, alt_distance))
+                            break
+                candidate_moves.sort(key=lambda item: item[0])
+                for _, candidate, alt_name, alt_distance in candidate_moves:
+                    unassign(candidate)
+                    commit(candidate, alt_name, alt_distance)
+                    if remaining_orders[route_name] >= needed:
+                        commit(stop, route_name, distance)
+                        return True
+            return False
+
+        ordered_stops = sorted(
+            stops,
+            key=lambda stop: (-stop["order_count"], -stop["gap"]),
+        )
+
+        for stop in ordered_stops:
+            assigned = False
+            for route_name, distance in stop["preferences"]:
+                if remaining_orders[route_name] >= stop["order_count"]:  # type: ignore[index]
+                    commit(stop, route_name, distance)
+                    assigned = True
+                    break
+            if not assigned:
+                if not try_reassign(stop):
+                    raise ValueError(
+                        f"Unable to assign address '{stop['address']}' within route capacity constraints."
+                    )
+
+        for stop in stops:
+            route_name = stop["assigned_route"]
+            if route_name is None:
+                raise ValueError(f"Address '{stop['address']}' failed to receive a route assignment.")
+            route_obj = centers[route_name]
+            for order in stop["orders"]:
+                order.route = route_obj
+                order.route_position = None
+
     def _orders_for_route(self, route_name: str) -> List[Order]:
-        orders = [order for order in self.orders if self._route_name(order) == route_name]  # orders scoped to the route
+        orders = [order for order in self.orders if self._route_name(order) == route_name]
         return sorted(
             orders,
             key=lambda order: (
@@ -285,7 +432,7 @@ class OrderBook:
                 order.id if order.id is not None else 0,
             ),
         )
-
+    
     def _ordered_route_names(self) -> List[str]:
         names: List[str] = []  # preserves first-seen order of route names
         seen = set()
@@ -295,11 +442,11 @@ class OrderBook:
                 seen.add(name)
                 names.append(name)
         return names
-
+    
     @staticmethod
     def _route_name(order: Order) -> str:
         return order.route.name if order.route else "Unassigned"
-
+    
     @staticmethod
     def _resolve_route(route_name: str, routes: Optional[Dict[str, Route]]) -> Optional[Route]:
         if not route_name:
@@ -307,7 +454,7 @@ class OrderBook:
         if routes and route_name in routes:
             return routes[route_name]
         return Route(name=route_name)
-
+    
     @staticmethod
     def _parse_int(value: Optional[str]) -> Optional[int]:
         if value is None or value == "":
@@ -316,7 +463,7 @@ class OrderBook:
             return int(value)
         except ValueError:
             return None
-
+    
     @staticmethod
     def _make_sheet_title(name: str, counts: Dict[str, int]) -> str:
         base = (name or "Unassigned")[:31]  # Excel imposes a 31 character limit
@@ -328,7 +475,7 @@ class OrderBook:
         counts[base] = count
         counts[title] = 0
         return title
-
+    
     @staticmethod
     def _with_suffix(base: str, count: int) -> str:
         if count <= 0:
@@ -339,8 +486,8 @@ class OrderBook:
         result = f"{trimmed}{suffix}"
         return result[:31]
 
-
 def geocode_orders(orders: Iterable[Order], cache_path: Path, delay_seconds: float = 1.0) -> None:
+    cache_path = Path(cache_path)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     if not cache_path.exists():
         with cache_path.open("w", newline="", encoding="utf-8") as handle:
@@ -399,6 +546,7 @@ def geocode_orders(orders: Iterable[Order], cache_path: Path, delay_seconds: flo
         if not results:
             raise ValueError(f"Nominatim could not find address: {_address_with_notes(order, ' | ')}")
 
+        print(results)
         ordered_candidates = sorted(
             results,
             key=lambda item: _distance_km(float(item["lat"]), float(item["lon"]), VICTORIA_LAT, VICTORIA_LON),
@@ -428,6 +576,7 @@ def geocode_orders(orders: Iterable[Order], cache_path: Path, delay_seconds: flo
         canonical_address = order.address1.strip()
         _register_cache_entry(cache, canonical, canonical_address, lat, lon)
         _append_cache_entry(cache_path, canonical_address, lat, lon)
+
 
 
 def _cache_key(order: Order) -> str:
@@ -533,13 +682,19 @@ def _format_float(value: Optional[float]) -> str:
     return f"{value:.6f}"
 
 
+
 def run_workflow() -> None:
     """Adjust the paths below and run this file in PyCharm to execute the workflow."""
     external_csv = Path("data/real_addresses.csv")  # TODO: update to the latest external CSV
     routes_csv = Path("data/route_centers.csv")  # optional route metadata lookup
-    working_csv = Path("output/orders_working.csv")  # internal, full-data CSV output
-    simple_xlsx = Path("output/orders_simple.xlsx")  # simplified workbook for sharing
-    kml_path = Path("output/orders_route.kml")  # optional Google Earth export
+
+    output_dir = Path("output") / datetime.now().strftime(OUTPUT_TIMESTAMP_FORMAT)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Output directory: {output_dir}")
+
+    working_csv = output_dir / "orders_working.csv"  # internal, full-data CSV output
+    simple_xlsx = output_dir / "orders_simple.xlsx"  # simplified workbook for sharing
+    kml_path = output_dir / "orders_route.kml"  # optional Google Earth export
 
     routes: Optional[Dict[str, Route]] = None
     if routes_csv.exists():
@@ -563,6 +718,16 @@ def run_workflow() -> None:
         print(exc)
         return
 
+    if routes:
+        try:
+            book.assign_routes(routes, max_orders_per_route=MAX_ORDERS_PER_ROUTE)
+            print(f"Assigned routes with a cap of {MAX_ORDERS_PER_ROUTE} orders per route.")
+        except ValueError as exc:
+            print(f"Unable to assign routes: {exc}")
+            return
+    else:
+        print("No routes provided; skipping route assignment.")
+
     try:
         book.to_working_csv(working_csv)
         print(f"Saved working CSV to {working_csv}")
@@ -585,9 +750,10 @@ def run_workflow() -> None:
         except OSError as exc:
             print(f"Unable to write KML: {exc}")
 
-
 if __name__ == "__main__":
     run_workflow()
+
+
 
 
 
