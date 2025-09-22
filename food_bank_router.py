@@ -347,7 +347,11 @@ def geocode_orders(orders: Iterable[Order], cache_path: Path, delay_seconds: flo
             writer = csv.writer(handle)
             writer.writerow(["address", "lat", "lon"])
 
-    cache = _load_address_cache(cache_path)
+    cache, canonical, entry_count, has_header = _load_address_cache(cache_path)
+    if (entry_count and entry_count != len(canonical)) or (entry_count and not has_header):
+        _rewrite_cache_file(cache_path, canonical)
+        cache, canonical, entry_count, has_header = _load_address_cache(cache_path)
+
     session = requests.Session()
     session.headers.update({"User-Agent": f"FoodBankRouter/1.0 ({NOMINATIM_EMAIL})"})
 
@@ -395,7 +399,19 @@ def geocode_orders(orders: Iterable[Order], cache_path: Path, delay_seconds: flo
         if not results:
             raise ValueError(f"Nominatim could not find address: {_address_with_notes(order, ' | ')}")
 
-        best, ordered_candidates = _choose_best_result(results)
+        ordered_candidates = sorted(
+            results,
+            key=lambda item: _distance_km(float(item["lat"]), float(item["lon"]), VICTORIA_LAT, VICTORIA_LON),
+        )
+
+        best = None
+        for candidate in ordered_candidates:
+            candidate_lat = float(candidate["lat"])
+            candidate_lon = float(candidate["lon"])
+            if _within_victoria(candidate_lat, candidate_lon):
+                best = candidate
+                break
+
         if best is None:
             sample = ordered_candidates[0]
             sample_lat = float(sample["lat"])
@@ -409,55 +425,79 @@ def geocode_orders(orders: Iterable[Order], cache_path: Path, delay_seconds: flo
 
         order.lat = lat
         order.lon = lon
-        cache[key] = (lat, lon)
-        _append_cache_entry(cache_path, order.address1.strip(), lat, lon)
+        canonical_address = order.address1.strip()
+        _register_cache_entry(cache, canonical, canonical_address, lat, lon)
+        _append_cache_entry(cache_path, canonical_address, lat, lon)
 
 
 def _cache_key(order: Order) -> str:
     return order.address1.strip().lower()
 
 
-def _load_address_cache(cache_path: Path) -> Dict[str, Tuple[float, float]]:
+def _register_cache_entry(
+    cache: Dict[str, Tuple[float, float]],
+    canonical: Dict[str, Tuple[float, float]],
+    address: str,
+    lat: float,
+    lon: float,
+) -> None:
+    canonical[address] = (lat, lon)
+    normalized = address.lower()
+    cache[normalized] = (lat, lon)
+    first_line = address.splitlines()[0].strip().lower()
+    if first_line:
+        cache[first_line] = (lat, lon)
+
+
+def _load_address_cache(cache_path: Path) -> Tuple[
+    Dict[str, Tuple[float, float]],
+    Dict[str, Tuple[float, float]],
+    int,
+    bool,
+]:
     cache: Dict[str, Tuple[float, float]] = {}
+    canonical: Dict[str, Tuple[float, float]] = {}
     if not cache_path.exists():
-        return cache
+        return cache, canonical, 0, True
+
+    valid_rows = 0
+    has_header = False
+
     with cache_path.open(newline="", encoding="utf-8-sig") as handle:
-        reader = csv.DictReader(handle)
-        for row in reader:
-            address = (row.get("address") or "").strip()
-            lat = Route._parse_float(row.get("lat"))
-            lon = Route._parse_float(row.get("lon"))
+        reader = csv.reader(handle)
+        for idx, row in enumerate(reader):
+            if not row:
+                continue
+            if idx == 0 and row[0].strip().lower() == "address":
+                has_header = True
+                continue
+            address = (row[0] if len(row) > 0 else "").strip()
+            lat = Route._parse_float(row[1] if len(row) > 1 else None)
+            lon = Route._parse_float(row[2] if len(row) > 2 else None)
             if not address or lat is None or lon is None:
                 continue
-            keys = {address.lower()}
-            first_line = address.splitlines()[0].strip().lower()
-            if first_line:
-                keys.add(first_line)
-            for key in keys:
-                cache[key] = (lat, lon)
-    return cache
+            valid_rows += 1
+            _register_cache_entry(cache, canonical, address, lat, lon)
+
+    return cache, canonical, valid_rows, has_header
+
+
+def _rewrite_cache_file(cache_path: Path, canonical: Dict[str, Tuple[float, float]]) -> None:
+    with cache_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["address", "lat", "lon"])
+        for address in sorted(canonical):
+            lat, lon = canonical[address]
+            writer.writerow([address, f"{lat:.8f}", f"{lon:.8f}"])
 
 
 def _append_cache_entry(cache_path: Path, address: str, lat: float, lon: float) -> None:
     with cache_path.open("a", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow([address, f"{lat:.8f}", f"{lon:.8f}"])
+        handle.flush()
 
 
-def _choose_best_result(results: List[Dict[str, str]]) -> Tuple[Optional[Dict[str, str]], List[Dict[str, str]]]:
-    print(results)
-    ordered = sorted(
-        results,
-        key=lambda item: _distance_km(float(item["lat"]), float(item["lon"]), VICTORIA_LAT, VICTORIA_LON),
-    )
-
-    for candidate in ordered:
-        lat = float(candidate["lat"])
-        lon = float(candidate["lon"])
-        if _within_victoria(lat, lon):
-            return candidate, ordered
-
-    return None, ordered
 
 
 def _within_victoria(lat: float, lon: float) -> bool:
@@ -548,6 +588,7 @@ def run_workflow() -> None:
 
 if __name__ == "__main__":
     run_workflow()
+
 
 
 
