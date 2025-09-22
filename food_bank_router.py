@@ -22,8 +22,19 @@ VICTORIA_BOUNDING_BOX = {
 
 VICTORIA_VIEWBOX = f"{VICTORIA_BOUNDING_BOX['min_lon']},{VICTORIA_BOUNDING_BOX['min_lat']},{VICTORIA_BOUNDING_BOX['max_lon']},{VICTORIA_BOUNDING_BOX['max_lat']}"
 
-MAX_ORDERS_PER_ROUTE = 16
+MAX_ORDERS_PER_ROUTE = 20
 OUTPUT_TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
+
+KML_ROUTE_COLORS = [
+    "ff0000ff",  # red
+    "ff00ff00",  # green
+    "ffff0000",  # blue
+    "ff00ffff",  # yellow
+    "ffff00ff",  # magenta
+    "ffffff00",  # cyan
+    "ff7f00ff",  # orange
+    "ff007fff",  # purple
+]
 
 @dataclass
 class Route:
@@ -195,6 +206,9 @@ class OrderBook:
                     }
                 )
 
+    
+
+
     def to_simple_xlsx(self, xlsx_path: str | Path) -> None:
         try:
             from openpyxl import Workbook
@@ -209,12 +223,23 @@ class OrderBook:
         route_names = self._ordered_route_names()  # ordered list of route sheet names
         used_titles: Dict[str, int] = {}  # tracks sheet name collisions
 
+        summary_sheet = workbook.create_sheet(title="Route Summary")
+        summary_sheet.append(["Route", "Orders", "Stops"])
+
         for route_name in route_names:
+            orders_in_route = self._orders_for_route(route_name)
             sheet_title = self._make_sheet_title(route_name, used_titles)
             sheet = workbook.create_sheet(title=sheet_title)
             sheet.append(headers)
 
-            for order in self._orders_for_route(route_name):
+            unique_stops = {
+                order.address1.strip().lower()
+                for order in orders_in_route
+                if order.address1.strip()
+            }
+            summary_sheet.append([route_name, len(orders_in_route), len(unique_stops)])
+
+            for order in orders_in_route:
                 sheet.append(
                     [
                         order.address_cell(),
@@ -237,7 +262,26 @@ class OrderBook:
         kml = ET.Element("kml", xmlns="http://www.opengis.net/kml/2.2")
         document = ET.SubElement(kml, "Document")
 
-        for route_name in self._ordered_route_names():
+        route_names = self._ordered_route_names()
+        style_ids: Dict[str, str] = {}
+        for idx, route_name in enumerate(route_names):
+            color = KML_ROUTE_COLORS[idx % len(KML_ROUTE_COLORS)]
+            style_id = f"route-style-{idx}"
+            style = ET.SubElement(document, "Style", id=style_id)
+
+            icon_style = ET.SubElement(style, "IconStyle")
+            ET.SubElement(icon_style, "color").text = color
+            ET.SubElement(icon_style, "scale").text = "1.1"
+            icon = ET.SubElement(icon_style, "Icon")
+            ET.SubElement(icon, "href").text = "http://maps.google.com/mapfiles/kml/paddle/wht-blank.png"
+
+            line_style = ET.SubElement(style, "LineStyle")
+            ET.SubElement(line_style, "color").text = color
+            ET.SubElement(line_style, "width").text = "2"
+
+            style_ids[route_name] = style_id
+
+        for route_name in route_names:
             folder = ET.SubElement(document, "Folder")
             ET.SubElement(folder, "name").text = route_name
 
@@ -251,6 +295,9 @@ class OrderBook:
                     seen_positions.add(order.route_position)
 
                 placemark = ET.SubElement(folder, "Placemark")
+                style_id = style_ids.get(route_name)
+                if style_id:
+                    ET.SubElement(placemark, "styleUrl").text = f"#{style_id}"
                 label = "" if order.route_position is None else str(order.route_position)
                 ET.SubElement(placemark, "name").text = label
                 ET.SubElement(placemark, "description").text = _address_with_notes(order)
@@ -273,15 +320,15 @@ class OrderBook:
                 ]
                 if len(ordered) >= 2:
                     line = ET.SubElement(folder, "Placemark")
+                    style_id = style_ids.get(route_name)
+                    if style_id:
+                        ET.SubElement(line, "styleUrl").text = f"#{style_id}"
                     ET.SubElement(line, "name").text = "Route"
                     line_string = ET.SubElement(line, "LineString")
                     ET.SubElement(line_string, "coordinates").text = " ".join(ordered)
 
         tree = ET.ElementTree(kml)
         tree.write(path, encoding="utf-8", xml_declaration=True)
-
-
-
 
     def assign_routes(
         self,
@@ -351,49 +398,79 @@ class OrderBook:
                 f"Not enough route capacity ({capacity_total}) for {total_orders} orders. Increase MAX_ORDERS_PER_ROUTE or add routes."
             )
 
+        route_names = list(centers.keys())
+        total_stops = len(stops)
+        if total_stops == 0:
+            return
+        base_stop_capacity = total_stops // len(route_names)
+        extra_stops = total_stops % len(route_names)
+
+        remaining_stops: Dict[str, int] = {}
+        for idx, name in enumerate(route_names):
+            remaining_stops[name] = base_stop_capacity + (1 if idx < extra_stops else 0)
+        assigned_stop_capacity = sum(remaining_stops.values())
+        if assigned_stop_capacity < total_stops:
+            deficit = total_stops - assigned_stop_capacity
+            for name in route_names:
+                if deficit <= 0:
+                    break
+                remaining_stops[name] += 1
+                deficit -= 1
+
         remaining_orders: Dict[str, int] = {name: max_orders_per_route for name in centers}
         assignments: Dict[str, List[Dict[str, object]]] = {name: [] for name in centers}
 
         def commit(stop: Dict[str, object], route_name: str, distance: float) -> None:
+            if remaining_orders[route_name] < stop["order_count"] or remaining_stops[route_name] <= 0:
+                raise ValueError(f"Route '{route_name}' exceeded capacity when committing stop '{stop['address']}'.")
             stop["assigned_route"] = route_name
             stop["assigned_distance"] = distance
             assignments[route_name].append(stop)
-            remaining_orders[route_name] -= stop["order_count"]  # type: ignore[index]
+            remaining_orders[route_name] -= stop["order_count"]
+            remaining_stops[route_name] -= 1
 
         def unassign(stop: Dict[str, object]) -> None:
             route_name = stop.get("assigned_route")
             if route_name is None:
                 return
             assignments[route_name].remove(stop)
-            remaining_orders[route_name] += stop["order_count"]  # type: ignore[index]
+            remaining_orders[route_name] += stop["order_count"]
+            remaining_stops[route_name] += 1
             stop["assigned_route"] = None
             stop["assigned_distance"] = None
 
         def try_reassign(stop: Dict[str, object]) -> bool:
-            needed = stop["order_count"]  # type: ignore[index]
-            for route_name, distance in stop["preferences"]:  # type: ignore[index]
-                if remaining_orders[route_name] >= needed:
+            needed_orders = stop["order_count"]
+            for route_name, distance in stop["preferences"]:
+                if remaining_orders[route_name] >= needed_orders and remaining_stops[route_name] >= 1:
                     commit(stop, route_name, distance)
                     return True
 
                 candidate_moves: List[Tuple[float, Dict[str, object], str, float]] = []
-                for candidate in assignments[route_name]:
+                for candidate in list(assignments[route_name]):
                     if candidate is stop:
                         continue
-                    for alt_name, alt_distance in candidate["preferences"]:  # type: ignore[index]
+                    current_distance = float(candidate.get("assigned_distance") or 0.0)
+                    for alt_name, alt_distance in candidate["preferences"]:
                         if alt_name == route_name:
                             continue
-                        if remaining_orders[alt_name] >= candidate["order_count"]:  # type: ignore[index]
-                            delta = alt_distance - candidate["assigned_distance"]  # type: ignore[index]
+                        if remaining_orders[alt_name] >= candidate["order_count"] and remaining_stops[alt_name] >= 1:
+                            delta = alt_distance - current_distance
                             candidate_moves.append((delta, candidate, alt_name, alt_distance))
                             break
                 candidate_moves.sort(key=lambda item: item[0])
+
                 for _, candidate, alt_name, alt_distance in candidate_moves:
+                    prev_route = candidate.get("assigned_route")
+                    prev_distance = float(candidate.get("assigned_distance") or 0.0)
                     unassign(candidate)
-                    commit(candidate, alt_name, alt_distance)
-                    if remaining_orders[route_name] >= needed:
-                        commit(stop, route_name, distance)
-                        return True
+                    if remaining_orders[alt_name] >= candidate["order_count"] and remaining_stops[alt_name] >= 1:
+                        commit(candidate, alt_name, alt_distance)
+                        if remaining_orders[route_name] >= needed_orders and remaining_stops[route_name] >= 1:
+                            commit(stop, route_name, distance)
+                            return True
+                        unassign(candidate)
+                    commit(candidate, prev_route, prev_distance)  # revert
             return False
 
         ordered_stops = sorted(
@@ -404,7 +481,7 @@ class OrderBook:
         for stop in ordered_stops:
             assigned = False
             for route_name, distance in stop["preferences"]:
-                if remaining_orders[route_name] >= stop["order_count"]:  # type: ignore[index]
+                if remaining_orders[route_name] >= stop["order_count"] and remaining_stops[route_name] >= 1:
                     commit(stop, route_name, distance)
                     assigned = True
                     break
@@ -432,7 +509,7 @@ class OrderBook:
                 order.id if order.id is not None else 0,
             ),
         )
-    
+
     def _ordered_route_names(self) -> List[str]:
         names: List[str] = []  # preserves first-seen order of route names
         seen = set()
@@ -442,11 +519,11 @@ class OrderBook:
                 seen.add(name)
                 names.append(name)
         return names
-    
+
     @staticmethod
     def _route_name(order: Order) -> str:
         return order.route.name if order.route else "Unassigned"
-    
+
     @staticmethod
     def _resolve_route(route_name: str, routes: Optional[Dict[str, Route]]) -> Optional[Route]:
         if not route_name:
@@ -454,7 +531,7 @@ class OrderBook:
         if routes and route_name in routes:
             return routes[route_name]
         return Route(name=route_name)
-    
+
     @staticmethod
     def _parse_int(value: Optional[str]) -> Optional[int]:
         if value is None or value == "":
@@ -463,7 +540,7 @@ class OrderBook:
             return int(value)
         except ValueError:
             return None
-    
+
     @staticmethod
     def _make_sheet_title(name: str, counts: Dict[str, int]) -> str:
         base = (name or "Unassigned")[:31]  # Excel imposes a 31 character limit
@@ -475,7 +552,7 @@ class OrderBook:
         counts[base] = count
         counts[title] = 0
         return title
-    
+
     @staticmethod
     def _with_suffix(base: str, count: int) -> str:
         if count <= 0:
@@ -718,15 +795,15 @@ def run_workflow() -> None:
         print(exc)
         return
 
-    if routes:
-        try:
-            book.assign_routes(routes, max_orders_per_route=MAX_ORDERS_PER_ROUTE)
-            print(f"Assigned routes with a cap of {MAX_ORDERS_PER_ROUTE} orders per route.")
-        except ValueError as exc:
-            print(f"Unable to assign routes: {exc}")
-            return
-    else:
-        print("No routes provided; skipping route assignment.")
+    # if routes:
+    #     try:
+    #         book.assign_routes(routes, max_orders_per_route=MAX_ORDERS_PER_ROUTE)
+    #         print(f"Assigned routes with a cap of {MAX_ORDERS_PER_ROUTE} orders per route.")
+    #     except ValueError as exc:
+    #         print(f"Unable to assign routes: {exc}")
+    #         return
+    # else:
+    #     print("No routes provided; skipping route assignment.")
 
     try:
         book.to_working_csv(working_csv)
@@ -752,6 +829,8 @@ def run_workflow() -> None:
 
 if __name__ == "__main__":
     run_workflow()
+
+
 
 
 
