@@ -7,13 +7,17 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
+from urllib.parse import quote_plus
 import requests
 import xml.etree.ElementTree as ET
 
 try:
-    from ortools.graph import pywrapgraph
+    from ortools.graph import pywrapgraph  # legacy location through 9.13
 except ImportError:
-    pywrapgraph = None
+    try:
+        from ortools.graph.python import min_cost_flow as pywrapgraph  # 9.14+ module path
+    except ImportError:
+        pywrapgraph = None
 
 NOMINATIM_EMAIL = "ilyakapral@gmail.com"
 VICTORIA_LAT = 48.4284
@@ -41,6 +45,11 @@ KML_ROUTE_COLORS = [
     "ff007fff",  # purple
 ]
 MCMF_DISTANCE_COST_MULTIPLIER = 1000
+DEFAULT_AVERAGE_SPEED_KMPH = 30.0  # conservative city routing speed
+GOOGLE_MAPS_MAX_WAYPOINTS = 10  # Google Maps accepts up to 10 locations per link (start + 9 stops)
+DEPOT_ADDRESS = "1900 Douglas St, Victoria, BC V8T 4K8"
+DEPOT_LAT = 48.431527
+DEPOT_LON = -123.364897
 
 @dataclass
 class Route:
@@ -86,12 +95,35 @@ class Order:
     lon: Optional[float] = None  # address longitude
     route: Optional[Route] = None  # assigned route metadata
     route_position: Optional[int] = None  # sequence slot inside the route
+    original_sequence: Optional[int] = None  # sequence from the external CSV intake
 
     def address_cell(self) -> str:
         if self.address2:
             return f"{self.address1}\n{self.address2}"
         return self.address1
 
+
+
+@dataclass
+class RouteStop:
+    address1: str
+    address2: str
+    lat: float
+    lon: float
+    orders: List[Order]
+    order_count: int
+    first_seen_index: int
+
+    def address_display(self) -> str:
+        return self.orders[0].address_cell().replace('\n', ', ')
+
+@dataclass
+class RouteReport:
+    total_orders: int
+    total_stops: int
+    total_distance_km: float
+    total_time_minutes: float
+    google_maps_links: List[str]
 
 class OrderBook:
     WORKING_HEADERS = [
@@ -106,10 +138,17 @@ class OrderBook:
         "lon",
         "route",
         "route_position",
+        "original_sequence",
+        "route_total_orders",
+        "route_total_stops",
+        "route_total_distance_km",
+        "route_total_time_minutes",
+        "route_google_maps_links",
     ]
 
     def __init__(self, orders: Optional[Iterable[Order]] = None):
         self.orders: List[Order] = list(orders or [])  # normalized list of orders
+        self.route_reports: Dict[str, RouteReport] = {}
 
     @classmethod
     def from_external_csv(
@@ -153,6 +192,7 @@ class OrderBook:
                         delivery_instructions=(row.get("Delivery Instructions") or "").strip(),
                         route=route_obj,
                         route_position=route_position,
+                        original_sequence=route_position,
                     )
                 )
         return cls(orders)
@@ -186,6 +226,7 @@ class OrderBook:
                         lon=Route._parse_float(row.get("lon")),
                         route=route_obj,
                         route_position=cls._parse_int(row.get("route_position")),
+                        original_sequence=cls._parse_int(row.get("original_sequence")),
                     )
                 )
         return cls(orders)
@@ -196,6 +237,7 @@ class OrderBook:
             writer = csv.DictWriter(handle, fieldnames=self.WORKING_HEADERS)
             writer.writeheader()
             for order in self.orders:
+                report = self.route_reports.get(self._route_name(order))
                 writer.writerow(
                     {
                         "id": order.id if order.id is not None else "",
@@ -209,6 +251,12 @@ class OrderBook:
                         "lon": _format_float(order.lon),
                         "route": order.route.name if order.route else "",
                         "route_position": order.route_position if order.route_position is not None else "",
+                        "original_sequence": order.original_sequence if order.original_sequence is not None else "",
+                        "route_total_orders": report.total_orders if report else "",
+                        "route_total_stops": report.total_stops if report else "",
+                        "route_total_distance_km": f"{report.total_distance_km:.3f}" if report else "",
+                        "route_total_time_minutes": f"{report.total_time_minutes:.1f}" if report else "",
+                        "route_google_maps_links": " | ".join(report.google_maps_links) if report else "",
                     }
                 )
 
@@ -225,29 +273,65 @@ class OrderBook:
         workbook = Workbook()
         workbook.remove(workbook.active)
 
-        headers = ["Address", "Name", "Phone", "Email", "Delivery Instructions"]  # column structure for each sheet
         route_names = self._ordered_route_names()  # ordered list of route sheet names
         used_titles: Dict[str, int] = {}  # tracks sheet name collisions
 
         summary_sheet = workbook.create_sheet(title="Route Summary")
-        summary_sheet.append(["Route", "Orders", "Stops"])
+        summary_headers = [
+            "Route",
+            "Orders",
+            "Stops",
+            "Distance (km)",
+            "Travel Time (min)",
+            "Google Maps Link 1",
+            "Google Maps Link 2",
+        ]
+        summary_sheet.append(summary_headers)
+
+        headers = [
+            "Route Position",
+            "Address",
+            "Name",
+            "Phone",
+            "Email",
+            "Delivery Instructions",
+        ]
 
         for route_name in route_names:
             orders_in_route = self._orders_for_route(route_name)
             sheet_title = self._make_sheet_title(route_name, used_titles)
             sheet = workbook.create_sheet(title=sheet_title)
-            sheet.append(headers)
 
+            report = self.route_reports.get(route_name)
+            total_orders = report.total_orders if report else len(orders_in_route)
             unique_stops = {
                 order.address1.strip().lower()
                 for order in orders_in_route
                 if order.address1.strip()
             }
-            summary_sheet.append([route_name, len(orders_in_route), len(unique_stops)])
+            total_stops = report.total_stops if report else len(unique_stops)
+            distance_str = f"{report.total_distance_km:.2f}" if report else ""
+            time_str = f"{report.total_time_minutes:.1f}" if report else ""
+            links = report.google_maps_links if report else []
+            link_values = [links[0] if len(links) > 0 else "", links[1] if len(links) > 1 else ""]
+
+            sheet.append(["Route", route_name])
+            sheet.append(["Total Orders", total_orders])
+            sheet.append(["Total Stops", total_stops])
+            sheet.append(["Total Distance (km)", distance_str])
+            sheet.append(["Total Travel Time (min)", time_str])
+            if links:
+                for idx, link in enumerate(links, start=1):
+                    sheet.append([f"Google Maps Link {idx}", link])
+            else:
+                sheet.append(["Google Maps Link 1", ""])
+            sheet.append([])
+            sheet.append(headers)
 
             for order in orders_in_route:
                 sheet.append(
                     [
+                        order.route_position if order.route_position is not None else "",
                         order.address_cell(),
                         order.name,
                         order.phone,
@@ -255,6 +339,17 @@ class OrderBook:
                         order.delivery_instructions,
                     ]
                 )
+
+            summary_sheet.append(
+                [
+                    route_name,
+                    total_orders,
+                    total_stops,
+                    distance_str,
+                    time_str,
+                    *link_values,
+                ]
+            )
 
         workbook.save(path)
 
@@ -348,6 +443,8 @@ class OrderBook:
         if not routes:
             raise ValueError("No routes provided for assignment.")
 
+        self.route_reports = {}
+
         centers: Dict[str, Route] = {}
         for name, route in routes.items():
             if route.lat is None or route.lon is None:
@@ -436,6 +533,33 @@ class OrderBook:
             f"Running min-cost flow assignment for {total_stops} stops across {route_count} routes."
         )
 
+        def _add_arc(solver, tail: int, head: int, capacity: int, cost: int) -> None:
+            if hasattr(solver, "AddArcWithCapacityAndUnitCost"):
+                solver.AddArcWithCapacityAndUnitCost(tail, head, capacity, cost)
+            else:
+                solver.add_arc_with_capacity_and_unit_cost(tail, head, capacity, cost)
+
+        def _set_supply(solver, node: int, supply: int) -> None:
+            if hasattr(solver, "SetNodeSupply"):
+                _set_supply(node, supply)
+            else:
+                solver.set_node_supply(node, supply)
+
+        def _num_arcs(solver) -> int:
+            return _num_arcs(solver) if hasattr(solver, "NumArcs") else solver.num_arcs()
+
+        def _tail(solver, arc_index: int) -> int:
+            return solver.Tail(arc_index) if hasattr(solver, "Tail") else solver.tail(arc_index)
+
+        def _head(solver, arc_index: int) -> int:
+            return solver.Head(arc_index) if hasattr(solver, "Head") else solver.head(arc_index)
+
+        def _flow(solver, arc_index: int) -> int:
+            return solver.Flow(arc_index) if hasattr(solver, "Flow") else solver.flow(arc_index)
+
+        def _solve_problem(solver) -> int:
+            return solver.Solve() if hasattr(solver, "Solve") else solver.solve()
+
         def _solve_flow(disabled_pairs: set[Tuple[int, int]]) -> List[int]:
             for stop_idx, stop in enumerate(stops):
                 has_arc = any(
@@ -454,7 +578,7 @@ class OrderBook:
             sink = route_offset + route_count
 
             for stop_idx in range(total_stops):
-                solver.AddArcWithCapacityAndUnitCost(source, stop_offset + stop_idx, 1, 0)
+                _add_arc(solver, source, stop_offset + stop_idx, 1, 0)
 
             for stop_idx, stop in enumerate(stops):
                 for route_idx, _ in stop["options"]:
@@ -462,7 +586,8 @@ class OrderBook:
                         continue
                     if (stop_idx, route_idx) in disabled_pairs:
                         continue
-                    solver.AddArcWithCapacityAndUnitCost(
+                    _add_arc(
+                        solver,
                         stop_offset + stop_idx,
                         route_offset + route_idx,
                         1,
@@ -472,25 +597,25 @@ class OrderBook:
             for route_idx, capacity in enumerate(stop_capacities):
                 if capacity <= 0:
                     continue
-                solver.AddArcWithCapacityAndUnitCost(route_offset + route_idx, sink, capacity, 0)
+                _add_arc(solver, route_offset + route_idx, sink, capacity, 0)
 
-            solver.SetNodeSupply(source, total_stops)
-            solver.SetNodeSupply(sink, -total_stops)
+            _set_supply(solver, source, total_stops)
+            _set_supply(solver, sink, -total_stops)
             for node in range(stop_offset, stop_offset + total_stops):
-                solver.SetNodeSupply(node, 0)
+                _set_supply(solver, node, 0)
             for node in range(route_offset, route_offset + route_count):
-                solver.SetNodeSupply(node, 0)
+                _set_supply(solver, node, 0)
 
-            status = solver.Solve()
+            status = _solve_problem(solver)
             if status != solver.OPTIMAL:
                 raise ValueError(f"Min-cost flow solver failed with status {status}.")
 
             assignments = [-1] * total_stops
-            for arc_idx in range(solver.NumArcs()):
-                tail = solver.Tail(arc_idx)
-                head = solver.Head(arc_idx)
+            for arc_idx in range(_num_arcs(solver)):
+                tail = _tail(solver, arc_idx)
+                head = _head(solver, arc_idx)
                 if stop_offset <= tail < route_offset and route_offset <= head < sink:
-                    if solver.Flow(arc_idx) > 0:
+                    if _flow(solver, arc_idx) > 0:
                         stop_idx = tail - stop_offset
                         route_idx = head - route_offset
                         assignments[stop_idx] = route_idx
@@ -578,6 +703,89 @@ class OrderBook:
             print(
                 f"Route {route_name}: {route_stop_totals[route_name]} stops, {route_order_totals[route_name]} orders."
             )
+
+    def sequence_routes(
+        self,
+        tsp_enabled: bool = True,
+        average_speed_kmph: float = DEFAULT_AVERAGE_SPEED_KMPH,
+    ) -> None:
+        if average_speed_kmph <= 0:
+            raise ValueError("average_speed_kmph must be positive.")
+
+        for order in self.orders:
+            order.route_position = None
+
+        route_stop_maps: Dict[str, Dict[str, RouteStop]] = {}
+        route_objects: Dict[str, Optional[Route]] = {}
+
+        for idx, order in enumerate(self.orders):
+            route_name = self._route_name(order)
+            if order.lat is None or order.lon is None:
+                raise ValueError(
+                    f"Order {order.id or order.address1 or 'unknown'} lacks coordinates; geocode before sequencing routes."
+                )
+            address1 = order.address1.strip()
+            if not address1:
+                raise ValueError(
+                    f"Order {order.id or order.name or 'unknown'} has empty address1."
+                )
+            key = address1.lower()
+            stop_map = route_stop_maps.setdefault(route_name, {})
+            stop = stop_map.get(key)
+            if stop is None:
+                first_seen = order.original_sequence if order.original_sequence is not None else idx + 1
+                stop = RouteStop(
+                    address1=order.address1,
+                    address2=order.address2,
+                    lat=order.lat,
+                    lon=order.lon,
+                    orders=[],
+                    order_count=0,
+                    first_seen_index=first_seen,
+                )
+                stop_map[key] = stop
+            stop.orders.append(order)
+            stop.order_count += 1
+
+            if route_name not in route_objects or route_objects[route_name] is None:
+                route_objects[route_name] = order.route
+
+        self.route_reports = {}
+
+        for route_name, stop_map in route_stop_maps.items():
+            stops = sorted(stop_map.values(), key=lambda stop: stop.first_seen_index)
+            if not stops:
+                continue
+
+            route_obj = route_objects.get(route_name)
+            start_label, start_coord = _resolve_route_start(route_obj, stops[0])
+
+            order_indexes = list(range(len(stops)))
+            if tsp_enabled and len(stops) > 1:
+                order_indexes = _optimize_stop_order(start_coord, stops)
+
+            ordered_stops = [stops[index] for index in order_indexes]
+            total_distance_km = _compute_route_distance_km(start_coord, ordered_stops)
+            total_orders = sum(stop.order_count for stop in ordered_stops)
+            total_stops = len(ordered_stops)
+            travel_time_minutes = (total_distance_km / average_speed_kmph * 60.0) if total_distance_km > 0 else 0.0
+            maps_links = _build_google_maps_links(
+                start_label,
+                [_format_stop_label(stop) for stop in ordered_stops],
+            )
+
+            for position, stop in enumerate(ordered_stops, start=1):
+                for order in stop.orders:
+                    order.route_position = position
+
+            self.route_reports[route_name] = RouteReport(
+                total_orders=total_orders,
+                total_stops=total_stops,
+                total_distance_km=total_distance_km,
+                total_time_minutes=travel_time_minutes,
+                google_maps_links=maps_links,
+            )
+
     def _orders_for_route(self, route_name: str) -> List[Order]:
         orders = [order for order in self.orders if self._route_name(order) == route_name]
         return sorted(
@@ -640,6 +848,106 @@ class OrderBook:
         trimmed = base[:limit] if limit else ""
         result = f"{trimmed}{suffix}"
         return result[:31]
+
+
+
+def _resolve_route_start(route: Optional[Route], fallback_stop: RouteStop) -> Tuple[str, Tuple[float, float]]:
+    return DEPOT_ADDRESS, (DEPOT_LAT, DEPOT_LON)
+
+
+def _format_coordinate(lat: float, lon: float) -> str:
+    return f"{lat:.6f},{lon:.6f}"
+
+
+def _format_stop_label(stop: RouteStop) -> str:
+    label = stop.address1.strip()
+    if not label:
+        label = _format_coordinate(stop.lat, stop.lon)
+    return label
+
+
+def _compute_route_distance_km(start_coord: Tuple[float, float], ordered_stops: List[RouteStop]) -> float:
+    if not ordered_stops:
+        return 0.0
+    total = 0.0
+    current_lat, current_lon = start_coord
+    for stop in ordered_stops:
+        total += _distance_km(current_lat, current_lon, stop.lat, stop.lon)
+        current_lat, current_lon = stop.lat, stop.lon
+    return total
+
+
+def _optimize_stop_order(start_coord: Tuple[float, float], stops: List[RouteStop]) -> List[int]:
+    order = _nearest_neighbor_order(start_coord, stops)
+    if len(order) < 3:
+        return order
+    return _two_opt(order, start_coord, stops)
+
+
+def _nearest_neighbor_order(start_coord: Tuple[float, float], stops: List[RouteStop]) -> List[int]:
+    remaining = set(range(len(stops)))
+    current_lat, current_lon = start_coord
+    route: List[int] = []
+    while remaining:
+        next_index = min(
+            remaining,
+            key=lambda idx: _distance_km(current_lat, current_lon, stops[idx].lat, stops[idx].lon),
+        )
+        route.append(next_index)
+        current_lat, current_lon = stops[next_index].lat, stops[next_index].lon
+        remaining.remove(next_index)
+    return route
+
+
+def _two_opt(order: List[int], start_coord: Tuple[float, float], stops: List[RouteStop]) -> List[int]:
+    best = order[:]
+    best_distance = _route_sequence_distance(best, start_coord, stops)
+    improved = True
+    while improved:
+        improved = False
+        for i in range(len(best) - 1):
+            for j in range(i + 2, len(best)):
+                if j - i == 1:
+                    continue
+                candidate = best[:]
+                candidate[i + 1 : j + 1] = reversed(candidate[i + 1 : j + 1])
+                candidate_distance = _route_sequence_distance(candidate, start_coord, stops)
+                if candidate_distance + 1e-6 < best_distance:
+                    best = candidate
+                    best_distance = candidate_distance
+                    improved = True
+        order = best
+    return best
+
+
+def _route_sequence_distance(order: List[int], start_coord: Tuple[float, float], stops: List[RouteStop]) -> float:
+    if not order:
+        return 0.0
+    total = 0.0
+    current_lat, current_lon = start_coord
+    for idx in order:
+        stop = stops[idx]
+        total += _distance_km(current_lat, current_lon, stop.lat, stop.lon)
+        current_lat, current_lon = stop.lat, stop.lon
+    return total
+
+
+def _build_google_maps_links(start_label: str, stop_labels: List[str]) -> List[str]:
+    if not stop_labels:
+        return []
+    max_points = max(2, GOOGLE_MAPS_MAX_WAYPOINTS)
+    stops_per_link = max_points - 1
+    links: List[str] = []
+    index = 0
+    current_start = start_label
+    while index < len(stop_labels):
+        chunk = stop_labels[index : index + stops_per_link]
+        parts = [current_start] + chunk
+        encoded = "/".join(quote_plus(part) for part in parts)
+        links.append(f"https://www.google.com/maps/dir/{encoded}")
+        current_start = chunk[-1]
+        index += stops_per_link
+    return links
 
 def geocode_orders(orders: Iterable[Order], cache_path: Path, delay_seconds: float = 1.0) -> None:
     cache_path = Path(cache_path)
@@ -851,6 +1159,9 @@ def run_workflow() -> None:
     simple_xlsx = output_dir / "orders_simple.xlsx"  # simplified workbook for sharing
     kml_path = output_dir / "orders_route.kml"  # optional Google Earth export
 
+    optimize_routes = True  # set to False to keep the import order for each route
+    average_speed_kmph = DEFAULT_AVERAGE_SPEED_KMPH
+
     routes: Optional[Dict[str, Route]] = None
     if routes_csv.exists():
         try:
@@ -873,15 +1184,23 @@ def run_workflow() -> None:
         print(exc)
         return
 
-    # if routes:
-    #     try:
-    #         book.assign_routes(routes, max_orders_per_route=MAX_ORDERS_PER_ROUTE)
-    #         print(f"Assigned routes with a cap of {MAX_ORDERS_PER_ROUTE} orders per route.")
-    #     except ValueError as exc:
-    #         print(f"Unable to assign routes: {exc}")
-    #         return
-    # else:
-    #     print("No routes provided; skipping route assignment.")
+    if routes:
+        try:
+            book.assign_routes(routes, max_orders_per_route=MAX_ORDERS_PER_ROUTE)
+            print(f"Assigned routes with a cap of {MAX_ORDERS_PER_ROUTE} orders per route.")
+        except ValueError as exc:
+            print(f"Unable to assign routes: {exc}")
+            return
+    else:
+        print("No routes provided; using existing route assignments.")
+
+    try:
+        book.sequence_routes(tsp_enabled=optimize_routes, average_speed_kmph=average_speed_kmph)
+        mode = "TSP-optimized" if optimize_routes else "import order"
+        print(f"Sequenced routes using {mode} ordering.")
+    except ValueError as exc:
+        print(f"Unable to sequence routes: {exc}")
+        return
 
     try:
         book.to_working_csv(working_csv)
@@ -900,7 +1219,7 @@ def run_workflow() -> None:
         print(f"Skipping KML export: missing coordinates for {len(missing_coords)} orders.")
     else:
         try:
-            book.to_kml(kml_path, connect_points=False)
+            book.to_kml(kml_path, connect_points=True)
             print(f"Saved KML to {kml_path}")
         except OSError as exc:
             print(f"Unable to write KML: {exc}")
