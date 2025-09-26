@@ -10,6 +10,11 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import requests
 import xml.etree.ElementTree as ET
 
+try:
+    from ortools.graph import pywrapgraph
+except ImportError:
+    pywrapgraph = None
+
 NOMINATIM_EMAIL = "ilyakapral@gmail.com"
 VICTORIA_LAT = 48.4284
 VICTORIA_LON = -123.3656
@@ -35,6 +40,7 @@ KML_ROUTE_COLORS = [
     "ff7f00ff",  # orange
     "ff007fff",  # purple
 ]
+MCMF_DISTANCE_COST_MULTIPLIER = 1000
 
 @dataclass
 class Route:
@@ -335,6 +341,10 @@ class OrderBook:
         routes: Dict[str, Route],
         max_orders_per_route: int = MAX_ORDERS_PER_ROUTE,
     ) -> None:
+        if pywrapgraph is None:
+            raise RuntimeError(
+                "OR-Tools is required for min-cost flow route assignment. Install 'ortools' to continue."
+            )
         if not routes:
             raise ValueError("No routes provided for assignment.")
 
@@ -344,13 +354,21 @@ class OrderBook:
                 raise ValueError(f"Route '{name}' is missing coordinates.")
             centers[name] = route
 
+        route_names = list(centers.keys())
+        route_count = len(route_names)
+        if route_count == 0:
+            raise ValueError("No usable routes found.")
+        route_index: Dict[str, int] = {name: idx for idx, name in enumerate(route_names)}
+
         stops_map: Dict[str, Dict[str, object]] = {}
         for order in self.orders:
             address = order.address1.strip()
             if not address:
                 raise ValueError(f"Order {order.id or order.name or 'unknown'} has empty address1.")
             if order.lat is None or order.lon is None:
-                raise ValueError(f"Order {order.id or address} lacks coordinates; geocode before assigning routes.")
+                raise ValueError(
+                    f"Order {order.id or address} lacks coordinates; geocode before assigning routes."
+                )
             key = address.lower()
             record = stops_map.setdefault(
                 key,
@@ -369,137 +387,197 @@ class OrderBook:
             lon = record.get("lon")
             if lat is None or lon is None:
                 raise ValueError(f"Address '{record['address']}' lacks coordinates.")
-            preferences = sorted(
-                (
-                    (name, _distance_km(lat, lon, centers[name].lat, centers[name].lon))
-                    for name in centers
-                ),
-                key=lambda item: item[1],
-            )
-            gap = preferences[1][1] - preferences[0][1] if len(preferences) > 1 else float("inf")
+            order_count = len(orders)
+            if order_count > max_orders_per_route:
+                raise ValueError(
+                    f"Address '{record['address']}' has {order_count} orders, which exceeds the per-route cap of {max_orders_per_route}."
+                )
+            options: List[Tuple[int, float]] = []
+            costs_by_route: Dict[int, int] = {}
+            for name in route_names:
+                idx = route_index[name]
+                center = centers[name]
+                assert center.lat is not None and center.lon is not None
+                distance = _distance_km(lat, lon, center.lat, center.lon)
+                cost = int(round(distance * MCMF_DISTANCE_COST_MULTIPLIER))
+                options.append((idx, distance))
+                costs_by_route[idx] = cost
+            options.sort(key=lambda item: item[1])
             stops.append(
                 {
                     "address": record["address"],
                     "orders": orders,
                     "lat": lat,
                     "lon": lon,
-                    "order_count": len(orders),
-                    "preferences": preferences,
-                    "gap": gap,
-                    "assigned_route": None,
-                    "assigned_distance": None,
+                    "order_count": order_count,
+                    "options": options,
+                    "costs": costs_by_route,
                 }
             )
 
         total_orders = sum(stop["order_count"] for stop in stops)
-        capacity_total = max_orders_per_route * len(centers)
+        total_stops = len(stops)
+        capacity_total = max_orders_per_route * route_count
         if total_orders > capacity_total:
             raise ValueError(
                 f"Not enough route capacity ({capacity_total}) for {total_orders} orders. Increase MAX_ORDERS_PER_ROUTE or add routes."
             )
-
-        route_names = list(centers.keys())
-        total_stops = len(stops)
         if total_stops == 0:
+            print("No stops available for route assignment; skipping.")
             return
-        base_stop_capacity = total_stops // len(route_names)
-        extra_stops = total_stops % len(route_names)
 
-        remaining_stops: Dict[str, int] = {}
-        for idx, name in enumerate(route_names):
-            remaining_stops[name] = base_stop_capacity + (1 if idx < extra_stops else 0)
-        assigned_stop_capacity = sum(remaining_stops.values())
-        if assigned_stop_capacity < total_stops:
-            deficit = total_stops - assigned_stop_capacity
-            for name in route_names:
-                if deficit <= 0:
-                    break
-                remaining_stops[name] += 1
-                deficit -= 1
+        def _balanced_stop_capacities(stop_total: int, route_total: int) -> List[int]:
+            base = stop_total // route_total
+            remainder = stop_total % route_total
+            return [base + (1 if idx < remainder else 0) for idx in range(route_total)]
 
-        remaining_orders: Dict[str, int] = {name: max_orders_per_route for name in centers}
-        assignments: Dict[str, List[Dict[str, object]]] = {name: [] for name in centers}
-
-        def commit(stop: Dict[str, object], route_name: str, distance: float) -> None:
-            if remaining_orders[route_name] < stop["order_count"] or remaining_stops[route_name] <= 0:
-                raise ValueError(f"Route '{route_name}' exceeded capacity when committing stop '{stop['address']}'.")
-            stop["assigned_route"] = route_name
-            stop["assigned_distance"] = distance
-            assignments[route_name].append(stop)
-            remaining_orders[route_name] -= stop["order_count"]
-            remaining_stops[route_name] -= 1
-
-        def unassign(stop: Dict[str, object]) -> None:
-            route_name = stop.get("assigned_route")
-            if route_name is None:
-                return
-            assignments[route_name].remove(stop)
-            remaining_orders[route_name] += stop["order_count"]
-            remaining_stops[route_name] += 1
-            stop["assigned_route"] = None
-            stop["assigned_distance"] = None
-
-        def try_reassign(stop: Dict[str, object]) -> bool:
-            needed_orders = stop["order_count"]
-            for route_name, distance in stop["preferences"]:
-                if remaining_orders[route_name] >= needed_orders and remaining_stops[route_name] >= 1:
-                    commit(stop, route_name, distance)
-                    return True
-
-                candidate_moves: List[Tuple[float, Dict[str, object], str, float]] = []
-                for candidate in list(assignments[route_name]):
-                    if candidate is stop:
-                        continue
-                    current_distance = float(candidate.get("assigned_distance") or 0.0)
-                    for alt_name, alt_distance in candidate["preferences"]:
-                        if alt_name == route_name:
-                            continue
-                        if remaining_orders[alt_name] >= candidate["order_count"] and remaining_stops[alt_name] >= 1:
-                            delta = alt_distance - current_distance
-                            candidate_moves.append((delta, candidate, alt_name, alt_distance))
-                            break
-                candidate_moves.sort(key=lambda item: item[0])
-
-                for _, candidate, alt_name, alt_distance in candidate_moves:
-                    prev_route = candidate.get("assigned_route")
-                    prev_distance = float(candidate.get("assigned_distance") or 0.0)
-                    unassign(candidate)
-                    if remaining_orders[alt_name] >= candidate["order_count"] and remaining_stops[alt_name] >= 1:
-                        commit(candidate, alt_name, alt_distance)
-                        if remaining_orders[route_name] >= needed_orders and remaining_stops[route_name] >= 1:
-                            commit(stop, route_name, distance)
-                            return True
-                        unassign(candidate)
-                    commit(candidate, prev_route, prev_distance)  # revert
-            return False
-
-        ordered_stops = sorted(
-            stops,
-            key=lambda stop: (-stop["order_count"], -stop["gap"]),
+        stop_capacities = _balanced_stop_capacities(total_stops, route_count)
+        print(
+            f"Running min-cost flow assignment for {total_stops} stops across {route_count} routes."
         )
 
-        for stop in ordered_stops:
-            assigned = False
-            for route_name, distance in stop["preferences"]:
-                if remaining_orders[route_name] >= stop["order_count"] and remaining_stops[route_name] >= 1:
-                    commit(stop, route_name, distance)
-                    assigned = True
-                    break
-            if not assigned:
-                if not try_reassign(stop):
+        def _solve_flow(disabled_pairs: set[Tuple[int, int]]) -> List[int]:
+            for stop_idx, stop in enumerate(stops):
+                has_arc = any(
+                    stop_capacities[route_idx] > 0 and (stop_idx, route_idx) not in disabled_pairs
+                    for route_idx, _ in stop["options"]
+                )
+                if not has_arc:
                     raise ValueError(
-                        f"Unable to assign address '{stop['address']}' within route capacity constraints."
+                        f"No available routes remain for address '{stop['address']}'."
                     )
 
-        for stop in stops:
-            route_name = stop["assigned_route"]
-            if route_name is None:
-                raise ValueError(f"Address '{stop['address']}' failed to receive a route assignment.")
+            solver = pywrapgraph.SimpleMinCostFlow()
+            source = 0
+            stop_offset = 1
+            route_offset = stop_offset + total_stops
+            sink = route_offset + route_count
+
+            for stop_idx in range(total_stops):
+                solver.AddArcWithCapacityAndUnitCost(source, stop_offset + stop_idx, 1, 0)
+
+            for stop_idx, stop in enumerate(stops):
+                for route_idx, _ in stop["options"]:
+                    if stop_capacities[route_idx] <= 0:
+                        continue
+                    if (stop_idx, route_idx) in disabled_pairs:
+                        continue
+                    solver.AddArcWithCapacityAndUnitCost(
+                        stop_offset + stop_idx,
+                        route_offset + route_idx,
+                        1,
+                        stop["costs"][route_idx],
+                    )
+
+            for route_idx, capacity in enumerate(stop_capacities):
+                if capacity <= 0:
+                    continue
+                solver.AddArcWithCapacityAndUnitCost(route_offset + route_idx, sink, capacity, 0)
+
+            solver.SetNodeSupply(source, total_stops)
+            solver.SetNodeSupply(sink, -total_stops)
+            for node in range(stop_offset, stop_offset + total_stops):
+                solver.SetNodeSupply(node, 0)
+            for node in range(route_offset, route_offset + route_count):
+                solver.SetNodeSupply(node, 0)
+
+            status = solver.Solve()
+            if status != solver.OPTIMAL:
+                raise ValueError(f"Min-cost flow solver failed with status {status}.")
+
+            assignments = [-1] * total_stops
+            for arc_idx in range(solver.NumArcs()):
+                tail = solver.Tail(arc_idx)
+                head = solver.Head(arc_idx)
+                if stop_offset <= tail < route_offset and route_offset <= head < sink:
+                    if solver.Flow(arc_idx) > 0:
+                        stop_idx = tail - stop_offset
+                        route_idx = head - route_offset
+                        assignments[stop_idx] = route_idx
+
+            if any(route_idx == -1 for route_idx in assignments):
+                raise ValueError("Solver returned incomplete route assignments.")
+            return assignments
+
+        banned_pairs: set[Tuple[int, int]] = set()
+        max_iterations = max(1, len(stops) * route_count * 2)
+        final_assignments: List[int] = []
+        route_stop_totals: Dict[str, int] = {}
+        route_order_totals: Dict[str, int] = {}
+
+        for iteration in range(max_iterations):
+            assignments = _solve_flow(banned_pairs)
+            route_stop_totals = {name: 0 for name in route_names}
+            route_order_totals = {name: 0 for name in route_names}
+            for stop_idx, route_idx in enumerate(assignments):
+                route_name = route_names[route_idx]
+                route_stop_totals[route_name] += 1
+                route_order_totals[route_name] += stops[stop_idx]["order_count"]
+
+            overflow = [name for name, total in route_order_totals.items() if total > max_orders_per_route]
+            if not overflow:
+                final_assignments = assignments
+                print("Min-cost flow assignment complete.")
+                break
+
+            print(
+                "Order cap exceeded for routes: " + ", ".join(overflow) + ". Attempting rebalance."
+            )
+            move_made = False
+            for route_name in overflow:
+                route_idx = route_index[route_name]
+                candidates: List[Tuple[float, int, int]] = []
+                for stop_idx, assigned_idx in enumerate(assignments):
+                    if assigned_idx != route_idx:
+                        continue
+                    current_cost = stops[stop_idx]["costs"][route_idx]
+                    for alt_route_idx, _ in stops[stop_idx]["options"]:
+                        if alt_route_idx == route_idx:
+                            continue
+                        if stop_capacities[alt_route_idx] <= 0:
+                            continue
+                        if (stop_idx, alt_route_idx) in banned_pairs:
+                            continue
+                        alt_route_name = route_names[alt_route_idx]
+                        projected_orders = (
+                            route_order_totals[alt_route_name] + stops[stop_idx]["order_count"]
+                        )
+                        if projected_orders > max_orders_per_route:
+                            continue
+                        delta_cost = stops[stop_idx]["costs"][alt_route_idx] - current_cost
+                        candidates.append((delta_cost, -stops[stop_idx]["order_count"], stop_idx))
+                        break
+                if candidates:
+                    candidates.sort()
+                    _, _, chosen_stop_idx = candidates[0]
+                    banned_pairs.add((chosen_stop_idx, route_idx))
+                    print(
+                        f"Rebalancing: preventing stop '{stops[chosen_stop_idx]['address']}' from route '{route_name}'."
+                    )
+                    move_made = True
+                    break
+
+            if not move_made:
+                raise ValueError(
+                    "Unable to satisfy per-route order cap with available routes. Increase MAX_ORDERS_PER_ROUTE or add routes."
+                )
+        else:
+            raise ValueError("Exceeded max attempts while enforcing order caps.")
+
+        if not final_assignments:
+            raise ValueError("Route assignment failed to converge.")
+
+        for stop_idx, route_idx in enumerate(final_assignments):
+            route_name = route_names[route_idx]
             route_obj = centers[route_name]
-            for order in stop["orders"]:
+            for order in stops[stop_idx]["orders"]:
                 order.route = route_obj
                 order.route_position = None
 
+        for route_name in route_names:
+            print(
+                f"Route {route_name}: {route_stop_totals[route_name]} stops, {route_order_totals[route_name]} orders."
+            )
     def _orders_for_route(self, route_name: str) -> List[Order]:
         orders = [order for order in self.orders if self._route_name(order) == route_name]
         return sorted(
@@ -829,6 +907,8 @@ def run_workflow() -> None:
 
 if __name__ == "__main__":
     run_workflow()
+
+
 
 
 
